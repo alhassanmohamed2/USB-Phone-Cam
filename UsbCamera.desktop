@@ -1,0 +1,9 @@
+[Desktop Entry]
+Version=1.0
+Name=USB Phone Cam
+Comment=Use Android Phone as OBS Webcam
+Exec=/home/alhassan/cameraUsb/launch.sh
+Icon=camera-web
+Terminal=false
+Type=Application
+Categories=Video;Utility;

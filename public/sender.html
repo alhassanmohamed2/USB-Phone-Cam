@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DroidCam Clone - Sender (H.264/VP8)</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+
+<body>
+    <h1>Sender (Native)</h1>
+    <div class="video-container">
+        <!-- Preview video -->
+        <video id="localVideo" autoplay playsinline muted></video>
+        <div id="status" class="status">Disconnected</div>
+    </div>
+    <div class="controls">
+        <button id="startBtn">Start Camera</button>
+        <button id="switchBtn">Switch Camera</button>
+        <button id="orientBtn">Mode: Landscape</button>
+        <div style="flex-basis: 100%; height: 0;"></div>
+        <select id="resolutionSelect"
+            style="padding: 10px; border-radius: 4px; background: #bb86fc; border: none; font-weight: bold;">
+            <option value="1920x1080">1080p (HQ)</option>
+            <option value="1280x720" selected>720p (Fast)</option>
+            <option value="640x480">480p (Fastest)</option>
+        </select>
+        <select id="bitrateSelect"
+            style="padding: 10px; border-radius: 4px; background: #bb86fc; border: none; font-weight: bold;">
+            <option value="1000000">1 Mbps</option>
+            <option value="2500000" selected>2.5 Mbps</option>
+            <option value="5000000">5 Mbps</option>
+        </select>
+    </div>
+
+    <script>
+        const localVideo = document.getElementById('localVideo');
+        const startBtn = document.getElementById('startBtn');
+        const switchBtn = document.getElementById('switchBtn');
+        const orientBtn = document.getElementById('orientBtn');
+        const resolutionSelect = document.getElementById('resolutionSelect');
+        const bitrateSelect = document.getElementById('bitrateSelect');
+        const statusDiv = document.getElementById('status');
+
+        let localStream;
+        let ws;
+        let encoder;
+        let currentFacingMode = 'environment';
+        let isPortrait = false;
+        let frameCounter = 0;
+        let activeConfig = null;
+
+        // Codec configuration (Baseline Profile, Level 5.2 for HD)
+        let codecConfig = {
+            codec: "avc1.420034",
+            width: 1280,
+            height: 720,
+            bitrate: 2500000,
+            framerate: 30,
+            avc: { format: "annexb" }
+        };
+
+        async function startCamera() {
+            try {
+                if (localStream) {
+                    localStream.getTracks().forEach(track => track.stop());
+                }
+
+                let [width, height] = resolutionSelect.value.split('x').map(Number);
+
+                if (isPortrait) {
+                    [width, height] = [height, width];
+                }
+
+                codecConfig.width = width;
+                codecConfig.height = height;
+                codecConfig.bitrate = Number(bitrateSelect.value);
+
+                localStream = await navigator.mediaDevices.getUserMedia({
+                    video: {
+                        facingMode: currentFacingMode,
+                        width: { ideal: width },
+                        height: { ideal: height },
+                        frameRate: { ideal: 30 }
+                    },
+                    audio: false
+                });
+
+                localVideo.srcObject = localStream;
+                startSignaling();
+            } catch (err) {
+                console.error("Error accessing camera:", err);
+                statusDiv.textContent = "Error: " + err.message;
+            }
+        }
+
+        function startSignaling() {
+            if (ws && (ws.readyState === WebSocket.OPEN)) {
+                initEncoder();
+                return;
+            }
+
+            statusDiv.textContent = "Connecting...";
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            ws = new WebSocket(`${protocol}//${window.location.host}/ws`);
+
+            ws.onopen = () => {
+                statusDiv.textContent = "Connected. Starting Encoder...";
+                if (localStream) initEncoder();
+            };
+
+            ws.onclose = () => {
+                statusDiv.textContent = "Disconnected";
+                if (encoder) encoder.close();
+                setTimeout(startSignaling, 2000);
+            };
+        }
+
+        async function initEncoder() {
+            if (!localStream) return;
+
+            // Clean up old encoder
+            if (encoder) {
+                try {
+                    if (encoder.state !== "closed") encoder.close();
+                } catch (e) { }
+            }
+
+            const videoTrack = localStream.getVideoTracks()[0];
+            const trackProcessor = new MediaStreamTrackProcessor(videoTrack);
+            const reader = trackProcessor.readable.getReader();
+
+            encoder = new VideoEncoder({
+                output: handleEncodedChunk,
+                error: (e) => {
+                    console.error("Encoder error:", e);
+                    statusDiv.textContent = "Enc Fail: " + e.message;
+                }
+            });
+
+            // Try H.264 First
+            try {
+                // IMPORTANT: Use ACTUAL camera resolution to prevent stretching
+                const settings = videoTrack.getSettings();
+                if (settings.width && settings.height) {
+                    codecConfig.width = settings.width;
+                    codecConfig.height = settings.height;
+                }
+
+                statusDiv.textContent = `Configuring H.264...`;
+                await encoder.configure(codecConfig);
+                activeConfig = codecConfig;
+                // Just let the Keyframe logic handle sending the first config
+                statusDiv.textContent = `H.264 Active: ${codecConfig.width}x${codecConfig.height}`;
+            } catch (err) {
+                console.warn("H.264 failed, trying VP8", err);
+                statusDiv.textContent = "H.264 Failed. Trying VP8...";
+
+                // Fallback to VP8
+                try {
+                    const vp8Config = {
+                        codec: "vp8",
+                        width: codecConfig.width,
+                        height: codecConfig.height,
+                        bitrate: codecConfig.bitrate,
+                        framerate: 30
+                    };
+                    await encoder.configure(vp8Config);
+                    activeConfig = vp8Config;
+                    statusDiv.textContent = "VP8 Active.";
+                } catch (vp8Err) {
+                    statusDiv.textContent = "Fatal: No codecs supported.";
+                    return;
+                }
+            }
+
+            // Start Reading
+            readFrames(reader);
+        }
+
+        async function readFrames(reader) {
+            try {
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+
+                    if (encoder.state === "closed") {
+                        value.close();
+                        break;
+                    }
+
+                    if (encoder.encodeQueueSize > 2) {
+                        value.close(); // Drop
+                    } else {
+                        frameCounter++;
+                        // Force Keyframe every 60 frames (approx 2s) to allow new clients to join
+                        const keyFrame = (frameCounter === 1) || (frameCounter % 60 === 0);
+
+                        try {
+                            encoder.encode(value, { keyFrame });
+                        } catch (encodeErr) {
+                            console.error("Encode Runtime Error", encodeErr);
+                        }
+                        value.close();
+
+                        if (frameCounter % 60 === 0) {
+                            statusDiv.textContent = `Streaming: ${frameCounter} frames (${activeConfig ? activeConfig.width + 'x' + activeConfig.height : ''})`;
+                        }
+                    }
+                }
+            } catch (e) {
+                console.error("Frame reading error", e);
+                statusDiv.textContent = "Read Error: " + e.message;
+            }
+        }
+
+        function handleEncodedChunk(chunk, metadata) {
+            if (ws.readyState !== WebSocket.OPEN) return;
+
+            // SYNC FIX: ALWAYS send Config immediately before a Key Frame.
+            // This ensures that:
+            // 1. New clients (OBS) get the config immediately (wait at most 2s).
+            // 2. Existing clients get a "redundant" config (which they ignore) followed by a Keyframe (which is valid).
+            // 3. We NEVER send a Config followed by a Delta frame, which causes crashes.
+
+            if (chunk.type === 'key' && activeConfig) {
+                ws.send(JSON.stringify({ type: "config", config: activeConfig }));
+            }
+
+            const headerSize = 9;
+            const data = new Uint8Array(headerSize + chunk.byteLength);
+            const view = new DataView(data.buffer);
+
+            view.setUint8(0, chunk.type === 'key' ? 1 : 0);
+            view.setFloat64(1, chunk.timestamp);
+            chunk.copyTo(data.subarray(headerSize));
+
+            ws.send(data);
+        }
+
+        startBtn.addEventListener('click', startCamera);
+
+        switchBtn.addEventListener('click', () => {
+            currentFacingMode = currentFacingMode === 'user' ? 'environment' : 'user';
+            startCamera();
+        });
+
+        orientBtn.addEventListener('click', () => {
+            isPortrait = !isPortrait;
+            orientBtn.textContent = isPortrait ? "Mode: Portrait" : "Mode: Landscape";
+            startCamera();
+        });
+
+        resolutionSelect.addEventListener('change', startCamera);
+        bitrateSelect.addEventListener('change', startCamera);
+
+        if (!window.VideoEncoder || !window.MediaStreamTrackProcessor) {
+            alert("WebCodecs Not Supported! Please update Chrome.");
+            statusDiv.textContent = "Error: WebCodecs API missing.";
+        }
+    </script>
+</body>
+
+</html>

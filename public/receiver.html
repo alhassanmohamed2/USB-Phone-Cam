@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DroidCam Clone - Receiver</title>
+    <style>
+        body {
+            margin: 0;
+            background-color: #000;
+            overflow: hidden;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+        }
+
+        canvas {
+            max-width: 100%;
+            max-height: 100%;
+        }
+
+        #status {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            color: lime;
+            font-family: monospace;
+            z-index: 100;
+            background: rgba(0, 0, 0, 0.5);
+            padding: 5px;
+        }
+    </style>
+</head>
+
+<body>
+    <div id="status">Waiting for stream...</div>
+    <canvas id="videoCanvas"></canvas>
+
+    <script>
+        const canvas = document.getElementById('videoCanvas');
+        const ctx = canvas.getContext('2d');
+        const statusDiv = document.getElementById('status');
+
+        let ws;
+        let decoder;
+        let frameCount = 0;
+        let currentConfigStr = "";
+
+        function startReceiver() {
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            ws = new WebSocket(`${protocol}//${window.location.host}/ws`);
+            ws.binaryType = "arraybuffer";
+
+            ws.onopen = () => {
+                statusDiv.textContent = "Connected. Waiting for config...";
+            };
+
+            ws.onmessage = async (event) => {
+                if (typeof event.data === 'string') {
+                    // Config message
+                    try {
+                        const msg = JSON.parse(event.data);
+                        if (msg.type === 'config') {
+                            // Robust Anti-Blink
+                            const newConfigStr = JSON.stringify(msg.config);
+                            // IGNORE if identical to what we already have
+                            if (newConfigStr === currentConfigStr && decoder && decoder.state === 'configured') {
+                                return;
+                            }
+
+                            statusDiv.textContent = `Config Update: ${msg.config.width}x${msg.config.height}`;
+                            currentConfigStr = newConfigStr;
+                            initDecoder(msg.config);
+
+                            canvas.width = msg.config.width;
+                            canvas.height = msg.config.height;
+                        }
+                    } catch (e) {
+                        console.error("Config parse error", e);
+                    }
+                } else {
+                    // Binary Video Chunk
+                    frameCount++;
+                    if (!decoder || decoder.state === 'closed') {
+                        if (frameCount % 60 === 0) statusDiv.textContent = `Rx: ${frameCount} (Decoder Closed!)`;
+                        return;
+                    }
+
+                    const data = new Uint8Array(event.data);
+                    const view = new DataView(data.buffer);
+
+                    // Parse Header
+                    const isKey = view.getUint8(0) === 1;
+                    const timestamp = view.getFloat64(1);
+                    const chunkData = data.subarray(9);
+
+                    if (frameCount % 60 === 0) {
+                        statusDiv.textContent = `Rx: ${frameCount} | ${isKey ? 'KEY' : 'Delta'}`;
+                    }
+
+                    const chunk = new EncodedVideoChunk({
+                        type: isKey ? 'key' : 'delta',
+                        timestamp: timestamp,
+                        data: chunkData
+                    });
+
+                    try {
+                        if (decoder.state === 'configured') {
+                            decoder.decode(chunk);
+                        }
+                    } catch (e) {
+                        console.error("Decode error:", e);
+                        statusDiv.textContent = "Decode Err: " + e.message;
+                        // DO NOT reset currentConfigStr here. We want to keep the config if it's valid.
+                    }
+                }
+            };
+
+            ws.onclose = () => {
+                statusDiv.textContent = "Disconnected. Reconnecting...";
+                currentConfigStr = "";
+                setTimeout(startReceiver, 1000);
+            };
+        }
+
+        function initDecoder(config) {
+            if (decoder) {
+                try { decoder.close(); } catch (e) { }
+            }
+
+            decoder = new VideoDecoder({
+                output: (frame) => {
+                    ctx.drawImage(frame, 0, 0);
+                    frame.close();
+                },
+                error: (e) => {
+                    console.error("Decoder error:", e);
+                    statusDiv.textContent = "Decoder Err: " + e.message;
+                    // Only reset config if the decoder itself failed critically
+                    currentConfigStr = "";
+                }
+            });
+
+            try {
+                decoder.configure(config);
+            } catch (e) {
+                statusDiv.textContent = "Config Err: " + e.message;
+            }
+        }
+
+        startReceiver();
+    </script>
+</body>
+
+</html>
