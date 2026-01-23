@@ -18,7 +18,8 @@ pkill -f "python server.py"
 ./start_usb.sh > usb_debug.log 2>&1
 
 # 3. Start Server (Background)
-./venv/bin/python server.py > server.log 2>&1 &
+# Use system python3 (Runtime dependency in Void Package)
+python3 server.py > server.log 2>&1 &
 SERVER_PID=$!
 
 # Wait for server to warm up
