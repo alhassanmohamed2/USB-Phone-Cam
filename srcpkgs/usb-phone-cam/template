@@ -9,7 +9,7 @@ maintainer="Alhassan <your-email@example.com>"
 license="MIT"
 homepage="https://github.com/alhassanmohamed2/USB-Phone-Cam"
 distfiles="https://github.com/alhassanmohamed2/USB-Phone-Cam/archive/refs/tags/v${version}.tar.gz"
-checksum=SKIP  # You would normally generate this with sha256sum
+checksum=7356ea79654addbc7025745885fc15a2f8439c64e08c548acd949585547573a1
 
 do_install() {
 	# Create directory structure
