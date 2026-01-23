@@ -1,7 +1,14 @@
 #!/bin/bash
 
-# Directory where the project is located
-PROJECT_DIR="/home/alhassan/cameraUsb"
+# Directory where the script is located (resolves symlinks)
+SOURCE=${BASH_SOURCE[0]}
+while [ -L "$SOURCE" ]; do # resolve $SOURCE until the file is no longer a symlink
+  DIR=$( cd -P "$( dirname "$SOURCE" )" >/dev/null 2>&1 && pwd )
+  SOURCE=$(readlink "$SOURCE")
+  [[ $SOURCE != /* ]] && SOURCE=$DIR/$SOURCE # if $SOURCE was a relative symlink, we need to resolve it relative to the path where the symlink file was located
+done
+PROJECT_DIR=$( cd -P "$( dirname "$SOURCE" )" >/dev/null 2>&1 && pwd )
+
 cd "$PROJECT_DIR"
 
 # 1. Cleanup old processes

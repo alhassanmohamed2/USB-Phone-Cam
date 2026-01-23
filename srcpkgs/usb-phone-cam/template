@@ -1,0 +1,33 @@
+# Template file for 'usb-phone-cam'
+pkgname=usb-phone-cam
+version=1.0.0
+revision=1
+build_style=gnu-makefile
+depends="python3 python3-tornado android-tools"
+short_desc="Turn Android phone into USB Webcam (WebCodecs/H.264)"
+maintainer="Alhassan <your-email@example.com>"
+license="MIT"
+homepage="https://github.com/alhassanmohamed2/USB-Phone-Cam"
+distfiles="https://github.com/alhassanmohamed2/USB-Phone-Cam/archive/refs/tags/v${version}.tar.gz"
+checksum=SKIP  # You would normally generate this with sha256sum
+
+do_install() {
+	# Create directory structure
+	vmkdir usr/share/usb-phone-cam
+	
+	# Copy Project Files
+	vcopy server.py usr/share/usb-phone-cam/
+	vcopy public usr/share/usb-phone-cam/
+	vcopy start_usb.sh usr/share/usb-phone-cam/
+	vcopy launch.sh usr/share/usb-phone-cam/
+	
+	# Install Desktop Entry
+	vinstall UsbCamera.desktop 644 usr/share/applications/
+	
+	# Create /usr/bin symlink
+	vmkdir usr/bin
+	ln -s /usr/share/usb-phone-cam/launch.sh ${DESTDIR}/usr/bin/usb-phone-cam
+	
+	# License
+	vlicense LICENSE
+}
