@@ -1,6 +1,6 @@
 # Template file for 'usb-phone-cam'
 pkgname=usb-phone-cam
-version=1.0.0
+version=1.0.1
 revision=1
 # build_style=gnu-makefile  <-- Removed: We don't have a Makefile
 depends="python3 python3-tornado android-tools"
@@ -9,7 +9,7 @@ maintainer="Alhassan <your-email@example.com>"
 license="MIT"
 homepage="https://github.com/alhassanmohamed2/USB-Phone-Cam"
 distfiles="https://github.com/alhassanmohamed2/USB-Phone-Cam/archive/refs/tags/v${version}.tar.gz"
-checksum=7356ea79654addbc7025745885fc15a2f8439c64e08c548acd949585547573a1
+checksum=be2e036e8309a85aef13d5d72035bdd820db2537feff330df365c24fffbe1486
 
 do_build() {
     : # No compilation needed, just a script
