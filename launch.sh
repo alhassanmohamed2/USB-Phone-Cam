@@ -1,7 +1,14 @@
 #!/bin/bash
 
-# Directory where the project is located
-PROJECT_DIR="/home/alhassan/cameraUsb"
+# Directory where the script is located (resolves symlinks)
+SOURCE=${BASH_SOURCE[0]}
+while [ -L "$SOURCE" ]; do # resolve $SOURCE until the file is no longer a symlink
+  DIR=$( cd -P "$( dirname "$SOURCE" )" >/dev/null 2>&1 && pwd )
+  SOURCE=$(readlink "$SOURCE")
+  [[ $SOURCE != /* ]] && SOURCE=$DIR/$SOURCE # if $SOURCE was a relative symlink, we need to resolve it relative to the path where the symlink file was located
+done
+PROJECT_DIR=$( cd -P "$( dirname "$SOURCE" )" >/dev/null 2>&1 && pwd )
+
 cd "$PROJECT_DIR"
 
 # 1. Cleanup old processes
@@ -11,7 +18,8 @@ pkill -f "python server.py"
 ./start_usb.sh > usb_debug.log 2>&1
 
 # 3. Start Server (Background)
-./venv/bin/python server.py > server.log 2>&1 &
+# Use system python3 (Runtime dependency in Void Package)
+python3 server.py > server.log 2>&1 &
 SERVER_PID=$!
 
 # Wait for server to warm up
