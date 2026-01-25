@@ -32,6 +32,9 @@
             <option value="2500000" selected>2.5 Mbps</option>
             <option value="5000000">5 Mbps</option>
         </select>
+        <div style="flex-basis: 100%; height: 0;"></div>
+        <button id="focusLockBtn" style="background: #03dac6;">🔓 Focus: Auto</button>
+        <button id="aeLockBtn" style="background: #03dac6;">🔓 AE: Auto</button>
     </div>
 
     <script>
@@ -50,6 +53,8 @@
         let isPortrait = false;
         let frameCounter = 0;
         let activeConfig = null;
+        let focusLocked = false;
+        let aeLocked = false;
 
         // Codec configuration (Baseline Profile, Level 5.2 for HD)
         let codecConfig = {
@@ -254,6 +259,72 @@
 
         resolutionSelect.addEventListener('change', startCamera);
         bitrateSelect.addEventListener('change', startCamera);
+
+        // Focus Lock Toggle
+        const focusLockBtn = document.getElementById('focusLockBtn');
+        focusLockBtn.addEventListener('click', async () => {
+            if (!localStream) return;
+            const videoTrack = localStream.getVideoTracks()[0];
+            const capabilities = videoTrack.getCapabilities();
+            
+            if (!capabilities.focusMode || capabilities.focusMode.length === 0) {
+                alert('Focus control not supported on this device.');
+                return;
+            }
+            
+            focusLocked = !focusLocked;
+            const newMode = focusLocked ? 'manual' : 'continuous';
+            
+            // Check if the desired mode is supported
+            if (!capabilities.focusMode.includes(newMode)) {
+                alert(`Focus mode '${newMode}' not supported.`);
+                focusLocked = !focusLocked; // Revert
+                return;
+            }
+            
+            try {
+                await videoTrack.applyConstraints({ advanced: [{ focusMode: newMode }] });
+                focusLockBtn.textContent = focusLocked ? '🔒 Focus: Locked' : '🔓 Focus: Auto';
+                focusLockBtn.style.background = focusLocked ? '#cf6679' : '#03dac6';
+            } catch (e) {
+                console.error('Focus lock failed:', e);
+                alert('Focus lock failed: ' + e.message);
+                focusLocked = !focusLocked; // Revert
+            }
+        });
+
+        // Auto Exposure Lock Toggle
+        const aeLockBtn = document.getElementById('aeLockBtn');
+        aeLockBtn.addEventListener('click', async () => {
+            if (!localStream) return;
+            const videoTrack = localStream.getVideoTracks()[0];
+            const capabilities = videoTrack.getCapabilities();
+            
+            if (!capabilities.exposureMode || capabilities.exposureMode.length === 0) {
+                alert('Exposure control not supported on this device.');
+                return;
+            }
+            
+            aeLocked = !aeLocked;
+            const newMode = aeLocked ? 'manual' : 'continuous';
+            
+            // Check if the desired mode is supported
+            if (!capabilities.exposureMode.includes(newMode)) {
+                alert(`Exposure mode '${newMode}' not supported.`);
+                aeLocked = !aeLocked; // Revert
+                return;
+            }
+            
+            try {
+                await videoTrack.applyConstraints({ advanced: [{ exposureMode: newMode }] });
+                aeLockBtn.textContent = aeLocked ? '🔒 AE: Locked' : '🔓 AE: Auto';
+                aeLockBtn.style.background = aeLocked ? '#cf6679' : '#03dac6';
+            } catch (e) {
+                console.error('AE lock failed:', e);
+                alert('AE lock failed: ' + e.message);
+                aeLocked = !aeLocked; // Revert
+            }
+        });
 
         if (!window.VideoEncoder || !window.MediaStreamTrackProcessor) {
             alert("WebCodecs Not Supported! Please update Chrome.");

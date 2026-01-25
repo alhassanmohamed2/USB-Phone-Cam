@@ -8,6 +8,7 @@ Uses **WebCodecs (H.264)** for hardware-accelerated streaming, providing near-na
 - ⚡ **Hardware Acceleration**: Uses H.264 / WebCodecs API for smooth 720p/1080p.
 - 📸 **High Quality**: Adjustable resolution (480p, 720p, 1080p) and bitrate.
 - 🔄 **Orientation Support**: Works in both Portrait and Landscape.
+- 🎯 **Focus & Exposure Lock**: Lock focus and auto-exposure for stable streaming.
 - 🔌 **OBS Ready**: Clean "Receiver" page designed specifically for OBS Browser Source.
 - 🐧 **Linux Native**: Includes a desktop launcher and installer.
 

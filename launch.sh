@@ -18,8 +18,16 @@ pkill -f "python server.py"
 ./start_usb.sh > usb_debug.log 2>&1
 
 # 3. Start Server (Background)
-# Use system python3 (Runtime dependency in Void Package)
-python3 server.py > server.log 2>&1 &
+# Smart Mode:
+# 1. If 'venv' exists locally (git clone), use it.
+# 2. If no 'venv' (system install), use system 'python3'.
+
+PYTHON_CMD="python3"
+if [ -f "$PROJECT_DIR/venv/bin/python" ]; then
+    PYTHON_CMD="$PROJECT_DIR/venv/bin/python"
+fi
+
+$PYTHON_CMD server.py > server.log 2>&1 &
 SERVER_PID=$!
 
 # Wait for server to warm up
