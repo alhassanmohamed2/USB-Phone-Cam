@@ -12,10 +12,10 @@ PROJECT_DIR=$( cd -P "$( dirname "$SOURCE" )" >/dev/null 2>&1 && pwd )
 cd "$PROJECT_DIR"
 
 # 1. Cleanup old processes
-pkill -f "python server.py"
+pkill -f "server.py"
 
 # 2. Start ADB (Log to file, don't show output)
-./start_usb.sh > usb_debug.log 2>&1
+./start_usb.sh > /tmp/usb_phone_cam_usb.log 2>&1
 
 # 3. Start Server (Background)
 # Smart Mode:
@@ -27,7 +27,7 @@ if [ -f "$PROJECT_DIR/venv/bin/python" ]; then
     PYTHON_CMD="$PROJECT_DIR/venv/bin/python"
 fi
 
-$PYTHON_CMD server.py > server.log 2>&1 &
+$PYTHON_CMD server.py > /tmp/usb_phone_cam_server.log 2>&1 &
 SERVER_PID=$!
 
 # Wait for server to warm up
