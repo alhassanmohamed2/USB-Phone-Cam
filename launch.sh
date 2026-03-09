@@ -1,5 +1,6 @@
 #!/bin/bash
 
+
 # Directory where the script is located (resolves symlinks)
 SOURCE=${BASH_SOURCE[0]}
 while [ -L "$SOURCE" ]; do # resolve $SOURCE until the file is no longer a symlink
