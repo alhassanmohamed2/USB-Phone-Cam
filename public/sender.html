@@ -171,6 +171,7 @@
             // Try H.264 First
             try {
                 // IMPORTANT: Use ACTUAL camera resolution to prevent stretching
+                const videoTrack = localStream.getVideoTracks()[0];
                 const settings = videoTrack.getSettings();
                 if (settings.width && settings.height) {
                     codecConfig.width = settings.width;
