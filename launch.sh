@@ -18,14 +18,6 @@ pkill -f "server.py"
 # 2. Start ADB (Log to file, don't show output)
 ./start_usb.sh > /tmp/usb_phone_cam_usb.log 2>&1
 
-# Keep ADB reverse alive in background to recover from loose cables/disconnects
-(
-    while true; do
-        sleep 5
-        # Re-apply adb reverse in case it dropped due to a loose cable
-        adb reverse tcp:3000 tcp:3000 > /dev/null 2>&1
-    done
-) &
 
 # 3. Start Server (Background)
 # Smart Mode:
@@ -39,6 +31,16 @@ fi
 
 $PYTHON_CMD server.py > /tmp/usb_phone_cam_server.log 2>&1 &
 SERVER_PID=$!
+
+# Keep ADB reverse alive in background to recover from loose cables/disconnects
+# Use nohup/disown so it survives the script exiting, and only run while server is alive
+nohup bash -c '
+    while pgrep -f "server.py" > /dev/null; do
+        sleep 5
+        adb reverse tcp:3000 tcp:3000 > /dev/null 2>&1
+    done
+' >/dev/null 2>&1 &
+disown
 
 # Wait for server to warm up
 sleep 2
