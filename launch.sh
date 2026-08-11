@@ -37,7 +37,9 @@ SERVER_PID=$!
 nohup bash -c '
     while pgrep -f "server.py" > /dev/null; do
         sleep 5
-        adb reverse tcp:3000 tcp:3000 > /dev/null 2>&1
+        if ! adb reverse --list | grep -q "tcp:3000"; then
+            adb reverse tcp:3000 tcp:3000 > /dev/null 2>&1
+        fi
     done
 ' >/dev/null 2>&1 &
 disown

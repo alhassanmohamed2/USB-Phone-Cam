@@ -352,6 +352,12 @@
             alert("WebCodecs Not Supported! Please update Chrome.");
             statusDiv.textContent = "Error: WebCodecs API missing.";
         }
+
+        // Auto-start camera when page loads
+        window.addEventListener('load', () => {
+            // Adding a small delay ensures DOM and constraints are fully ready
+            setTimeout(startCamera, 500);
+        });
     </script>
 </body>
 
