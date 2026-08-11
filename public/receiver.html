@@ -47,14 +47,32 @@
         let decoder;
         let frameCount = 0;
         let currentConfigStr = "";
+        let reconnectTimer = null;
+        let lastFrameTime = 0;
+        let stalledCheckTimer = null;
 
         function startReceiver() {
+            // Prevent stacking reconnect timers
+            if (reconnectTimer) {
+                clearTimeout(reconnectTimer);
+                reconnectTimer = null;
+            }
+
+            // Close stale socket
+            if (ws) {
+                try { ws.close(); } catch (e) { }
+                ws = null;
+            }
+
             const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
             ws = new WebSocket(`${protocol}//${window.location.host}/ws`);
             ws.binaryType = "arraybuffer";
 
             ws.onopen = () => {
-                statusDiv.textContent = "Connected. Waiting for config...";
+                statusDiv.textContent = "Connected. Waiting for stream...";
+                // Reset config so we accept a fresh config from the sender
+                currentConfigStr = "";
+                startStalledCheck();
             };
 
             ws.onmessage = async (event) => {
@@ -63,9 +81,8 @@
                     try {
                         const msg = JSON.parse(event.data);
                         if (msg.type === 'config') {
-                            // Robust Anti-Blink
                             const newConfigStr = JSON.stringify(msg.config);
-                            // IGNORE if identical to what we already have
+                            // IGNORE if identical to what we already have and decoder is healthy
                             if (newConfigStr === currentConfigStr && decoder && decoder.state === 'configured') {
                                 return;
                             }
@@ -83,6 +100,8 @@
                 } else {
                     // Binary Video Chunk
                     frameCount++;
+                    lastFrameTime = Date.now();
+
                     if (!decoder || decoder.state === 'closed') {
                         if (frameCount % 60 === 0) statusDiv.textContent = `Rx: ${frameCount} (Decoder Closed!)`;
                         return;
@@ -113,16 +132,46 @@
                     } catch (e) {
                         console.error("Decode error:", e);
                         statusDiv.textContent = "Decode Err: " + e.message;
-                        // DO NOT reset currentConfigStr here. We want to keep the config if it's valid.
                     }
                 }
             };
 
             ws.onclose = () => {
                 statusDiv.textContent = "Disconnected. Reconnecting...";
+                // Reset config so we re-init decoder on next connection
                 currentConfigStr = "";
-                setTimeout(startReceiver, 1000);
+                stopStalledCheck();
+                reconnectTimer = setTimeout(startReceiver, 1000);
             };
+
+            ws.onerror = (e) => {
+                console.error("WebSocket error", e);
+            };
+        }
+
+        // ─── Stall Detection ─────────────────────────────────────
+        // If we haven't received a frame in 5 seconds but we're still "connected",
+        // force a reconnect. This catches zombie WebSocket connections.
+        function startStalledCheck() {
+            stopStalledCheck();
+            lastFrameTime = Date.now();
+            stalledCheckTimer = setInterval(() => {
+                if (lastFrameTime > 0 && (Date.now() - lastFrameTime) > 5000) {
+                    console.warn("Stall detected: no frames for 5s. Reconnecting...");
+                    statusDiv.textContent = "Stalled. Reconnecting...";
+                    // Force close so onclose fires and triggers reconnect
+                    if (ws) {
+                        try { ws.close(); } catch (e) { }
+                    }
+                }
+            }, 2000);
+        }
+
+        function stopStalledCheck() {
+            if (stalledCheckTimer) {
+                clearInterval(stalledCheckTimer);
+                stalledCheckTimer = null;
+            }
         }
 
         function initDecoder(config) {

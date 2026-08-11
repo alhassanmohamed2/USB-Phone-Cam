@@ -55,6 +55,8 @@
         let activeConfig = null;
         let focusLocked = false;
         let aeLocked = false;
+        let isStreaming = false; // master flag: camera + encoder are alive
+        let reconnectTimer = null;
 
         // Codec configuration (Baseline Profile, Level 5.2 for HD)
         let codecConfig = {
@@ -66,6 +68,7 @@
             avc: { format: "annexb" }
         };
 
+        // ─── Wake Lock ───────────────────────────────────────────
         let wakeLock = null;
 
         async function requestWakeLock() {
@@ -88,14 +91,58 @@
             }
         });
 
+        // ─── WebSocket (connection only, no encoder logic) ───────
+        function connectWebSocket() {
+            // Don't stack reconnect attempts
+            if (reconnectTimer) {
+                clearTimeout(reconnectTimer);
+                reconnectTimer = null;
+            }
+
+            // Close stale socket
+            if (ws) {
+                try { ws.close(); } catch (e) { }
+                ws = null;
+            }
+
+            statusDiv.textContent = "Connecting...";
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            ws = new WebSocket(`${protocol}//${window.location.host}/ws`);
+
+            ws.onopen = () => {
+                statusDiv.textContent = isStreaming
+                    ? `Streaming: ${activeConfig ? activeConfig.width + 'x' + activeConfig.height : ''}`
+                    : "Connected. Press Start Camera.";
+                // Force a keyframe so the receiver gets a fresh start
+                frameCounter = 0;
+            };
+
+            ws.onerror = (e) => {
+                console.error("WebSocket error", e);
+            };
+
+            ws.onclose = () => {
+                statusDiv.textContent = "Disconnected. Reconnecting...";
+                // DO NOT touch encoder or camera — just reconnect the socket
+                reconnectTimer = setTimeout(connectWebSocket, 1000);
+            };
+        }
+
+        // ─── Camera + Encoder (started once, runs forever) ──────
         async function startCamera() {
             try {
+                // Stop old stream
                 if (localStream) {
                     localStream.getTracks().forEach(track => track.stop());
                 }
+                // Stop old encoder
+                if (encoder) {
+                    try { if (encoder.state !== "closed") encoder.close(); } catch (e) { }
+                    encoder = null;
+                }
+                isStreaming = false;
 
                 let [width, height] = resolutionSelect.value.split('x').map(Number);
-
                 if (isPortrait) {
                     [width, height] = [height, width];
                 }
@@ -115,62 +162,9 @@
                 });
 
                 localVideo.srcObject = localStream;
-                startSignaling();
                 await requestWakeLock();
 
-                const videoTrack = localStream.getVideoTracks()[0];
-                const trackProcessor = new MediaStreamTrackProcessor(videoTrack);
-                const reader = trackProcessor.readable.getReader();
-                readFrames(reader);
-            } catch (err) {
-                console.error("Error accessing camera:", err);
-                statusDiv.textContent = "Error: " + err.message;
-            }
-        }
-
-        function startSignaling() {
-            if (ws && (ws.readyState === WebSocket.OPEN)) {
-                initEncoder();
-                return;
-            }
-
-            statusDiv.textContent = "Connecting...";
-            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-            ws = new WebSocket(`${protocol}//${window.location.host}/ws`);
-
-            ws.onopen = () => {
-                statusDiv.textContent = "Connected. Starting Encoder...";
-                if (localStream) initEncoder();
-            };
-
-            ws.onclose = () => {
-                statusDiv.textContent = "Disconnected";
-                if (encoder) encoder.close();
-                setTimeout(startSignaling, 2000);
-            };
-        }
-
-        async function initEncoder() {
-            if (!localStream) return;
-
-            // Clean up old encoder
-            if (encoder) {
-                try {
-                    if (encoder.state !== "closed") encoder.close();
-                } catch (e) { }
-            }
-
-            encoder = new VideoEncoder({
-                output: handleEncodedChunk,
-                error: (e) => {
-                    console.error("Encoder error:", e);
-                    statusDiv.textContent = "Enc Fail: " + e.message;
-                }
-            });
-
-            // Try H.264 First
-            try {
-                // IMPORTANT: Use ACTUAL camera resolution to prevent stretching
+                // ─── Build encoder ───
                 const videoTrack = localStream.getVideoTracks()[0];
                 const settings = videoTrack.getSettings();
                 if (settings.width && settings.height) {
@@ -178,47 +172,83 @@
                     codecConfig.height = settings.height;
                 }
 
-                statusDiv.textContent = `Configuring H.264...`;
-                await encoder.configure(codecConfig);
-                activeConfig = codecConfig;
-                // Just let the Keyframe logic handle sending the first config
-                statusDiv.textContent = `H.264 Active: ${codecConfig.width}x${codecConfig.height}`;
-            } catch (err) {
-                console.warn("H.264 failed, trying VP8", err);
-                statusDiv.textContent = "H.264 Failed. Trying VP8...";
+                encoder = new VideoEncoder({
+                    output: handleEncodedChunk,
+                    error: (e) => {
+                        console.error("Encoder error:", e);
+                        statusDiv.textContent = "Enc Fail: " + e.message;
+                    }
+                });
 
-                // Fallback to VP8
+                // Try H.264 first, fallback to VP8
+                let configured = false;
                 try {
-                    const vp8Config = {
-                        codec: "vp8",
-                        width: codecConfig.width,
-                        height: codecConfig.height,
-                        bitrate: codecConfig.bitrate,
-                        framerate: 30
-                    };
-                    await encoder.configure(vp8Config);
-                    activeConfig = vp8Config;
-                    statusDiv.textContent = "VP8 Active.";
-                } catch (vp8Err) {
-                    statusDiv.textContent = "Fatal: No codecs supported.";
-                    return;
+                    await encoder.configure(codecConfig);
+                    activeConfig = { ...codecConfig };
+                    configured = true;
+                    statusDiv.textContent = `H.264 Active: ${codecConfig.width}x${codecConfig.height}`;
+                } catch (err) {
+                    console.warn("H.264 failed, trying VP8", err);
                 }
+
+                if (!configured) {
+                    try {
+                        const vp8Config = {
+                            codec: "vp8",
+                            width: codecConfig.width,
+                            height: codecConfig.height,
+                            bitrate: codecConfig.bitrate,
+                            framerate: 30
+                        };
+                        await encoder.configure(vp8Config);
+                        activeConfig = { ...vp8Config };
+                        statusDiv.textContent = "VP8 Active.";
+                    } catch (vp8Err) {
+                        statusDiv.textContent = "Fatal: No codecs supported.";
+                        return;
+                    }
+                }
+
+                isStreaming = true;
+                frameCounter = 0;
+
+                // ─── Start frame reading loop (runs for the lifetime of this camera session) ───
+                const trackProcessor = new MediaStreamTrackProcessor(videoTrack);
+                const reader = trackProcessor.readable.getReader();
+                readFrames(reader);
+
+                // ─── Connect WebSocket if not already connected ───
+                if (!ws || ws.readyState !== WebSocket.OPEN) {
+                    connectWebSocket();
+                }
+
+            } catch (err) {
+                console.error("Error accessing camera:", err);
+                statusDiv.textContent = "Error: " + err.message;
             }
         }
 
+        // ─── Frame loop: runs independently of WebSocket state ───
         async function readFrames(reader) {
             try {
                 while (true) {
                     const { done, value } = await reader.read();
                     if (done) break;
 
-                    if (!encoder || encoder.state === "closed" || !ws || ws.readyState !== WebSocket.OPEN) {
+                    // If encoder is dead, the whole camera session is over
+                    if (!encoder || encoder.state === "closed") {
+                        value.close();
+                        break;
+                    }
+
+                    // If WebSocket is not open, just drop the frame (don't break!)
+                    if (!ws || ws.readyState !== WebSocket.OPEN) {
                         value.close();
                         continue;
                     }
 
                     if (encoder.encodeQueueSize > 2) {
-                        value.close(); // Drop
+                        value.close(); // Drop to prevent backpressure
                     } else {
                         frameCounter++;
                         // Force Keyframe every 60 frames (approx 2s) to allow new clients to join
@@ -243,16 +273,13 @@
         }
 
         function handleEncodedChunk(chunk, metadata) {
-            if (ws.readyState !== WebSocket.OPEN) return;
+            if (!ws || ws.readyState !== WebSocket.OPEN) return;
 
             // SYNC FIX: ALWAYS send Config immediately before a Key Frame.
-            // This ensures that:
-            // 1. New clients (OBS) get the config immediately (wait at most 2s).
-            // 2. Existing clients get a "redundant" config (which they ignore) followed by a Keyframe (which is valid).
-            // 3. We NEVER send a Config followed by a Delta frame, which causes crashes.
-
             if (chunk.type === 'key' && activeConfig) {
-                ws.send(JSON.stringify({ type: "config", config: activeConfig }));
+                try {
+                    ws.send(JSON.stringify({ type: "config", config: activeConfig }));
+                } catch (e) { return; }
             }
 
             const headerSize = 9;
@@ -263,9 +290,14 @@
             view.setFloat64(1, chunk.timestamp);
             chunk.copyTo(data.subarray(headerSize));
 
-            ws.send(data);
+            try {
+                ws.send(data);
+            } catch (e) {
+                // WebSocket died mid-send, ignore — reconnect will handle it
+            }
         }
 
+        // ─── UI Event Listeners ──────────────────────────────────
         startBtn.addEventListener('click', startCamera);
 
         switchBtn.addEventListener('click', () => {
@@ -355,7 +387,6 @@
 
         // Auto-start camera when page loads
         window.addEventListener('load', () => {
-            // Adding a small delay ensures DOM and constraints are fully ready
             setTimeout(startCamera, 500);
         });
     </script>

@@ -32,13 +32,27 @@ fi
 $PYTHON_CMD server.py > /tmp/usb_phone_cam_server.log 2>&1 &
 SERVER_PID=$!
 
-# Keep ADB reverse alive in background to recover from loose cables/disconnects
-# Use nohup/disown so it survives the script exiting, and only run while server is alive
+# Keep ADB reverse alive in background to recover from USB disconnects.
+# This watches for the device to disappear/reappear and re-applies the tunnel.
+# Uses nohup/disown so it survives the launch script exiting.
 nohup bash -c '
+    LAST_STATE="connected"
     while pgrep -f "server.py" > /dev/null; do
-        sleep 5
-        if ! adb reverse --list | grep -q "tcp:3000"; then
-            adb reverse tcp:3000 tcp:3000 > /dev/null 2>&1
+        sleep 3
+        # Check if device is still present
+        if adb devices 2>/dev/null | grep -qw "device"; then
+            # Device present — check if tunnel exists
+            if ! adb reverse --list 2>/dev/null | grep -q "tcp:3000"; then
+                # Tunnel is gone (USB reconnected) — restore it
+                adb reverse tcp:3000 tcp:3000 > /dev/null 2>&1
+                echo "[$(date)] ADB tunnel restored" >> /tmp/usb_phone_cam_watchdog.log
+                LAST_STATE="connected"
+            fi
+        else
+            if [ "$LAST_STATE" = "connected" ]; then
+                echo "[$(date)] Device disconnected" >> /tmp/usb_phone_cam_watchdog.log
+                LAST_STATE="disconnected"
+            fi
         fi
     done
 ' >/dev/null 2>&1 &
