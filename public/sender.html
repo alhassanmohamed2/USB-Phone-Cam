@@ -117,6 +117,11 @@
                 localVideo.srcObject = localStream;
                 startSignaling();
                 await requestWakeLock();
+
+                const videoTrack = localStream.getVideoTracks()[0];
+                const trackProcessor = new MediaStreamTrackProcessor(videoTrack);
+                const reader = trackProcessor.readable.getReader();
+                readFrames(reader);
             } catch (err) {
                 console.error("Error accessing camera:", err);
                 statusDiv.textContent = "Error: " + err.message;
@@ -154,10 +159,6 @@
                     if (encoder.state !== "closed") encoder.close();
                 } catch (e) { }
             }
-
-            const videoTrack = localStream.getVideoTracks()[0];
-            const trackProcessor = new MediaStreamTrackProcessor(videoTrack);
-            const reader = trackProcessor.readable.getReader();
 
             encoder = new VideoEncoder({
                 output: handleEncodedChunk,
@@ -202,9 +203,6 @@
                     return;
                 }
             }
-
-            // Start Reading
-            readFrames(reader);
         }
 
         async function readFrames(reader) {
@@ -213,9 +211,9 @@
                     const { done, value } = await reader.read();
                     if (done) break;
 
-                    if (encoder.state === "closed") {
+                    if (!encoder || encoder.state === "closed" || !ws || ws.readyState !== WebSocket.OPEN) {
                         value.close();
-                        break;
+                        continue;
                     }
 
                     if (encoder.encodeQueueSize > 2) {
