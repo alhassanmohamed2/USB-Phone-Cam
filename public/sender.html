@@ -66,6 +66,28 @@
             avc: { format: "annexb" }
         };
 
+        let wakeLock = null;
+
+        async function requestWakeLock() {
+            try {
+                if ('wakeLock' in navigator) {
+                    wakeLock = await navigator.wakeLock.request('screen');
+                    wakeLock.addEventListener('release', () => {
+                        console.log('Screen Wake Lock released');
+                    });
+                    console.log('Screen Wake Lock acquired');
+                }
+            } catch (err) {
+                console.error(`Wake Lock error: ${err.name}, ${err.message}`);
+            }
+        }
+
+        document.addEventListener('visibilitychange', async () => {
+            if (wakeLock !== null && document.visibilityState === 'visible') {
+                await requestWakeLock();
+            }
+        });
+
         async function startCamera() {
             try {
                 if (localStream) {
@@ -94,6 +116,7 @@
 
                 localVideo.srcObject = localStream;
                 startSignaling();
+                await requestWakeLock();
             } catch (err) {
                 console.error("Error accessing camera:", err);
                 statusDiv.textContent = "Error: " + err.message;

@@ -18,6 +18,15 @@ pkill -f "server.py"
 # 2. Start ADB (Log to file, don't show output)
 ./start_usb.sh > /tmp/usb_phone_cam_usb.log 2>&1
 
+# Keep ADB reverse alive in background to recover from loose cables/disconnects
+(
+    while true; do
+        sleep 5
+        # Re-apply adb reverse in case it dropped due to a loose cable
+        adb reverse tcp:3000 tcp:3000 > /dev/null 2>&1
+    done
+) &
+
 # 3. Start Server (Background)
 # Smart Mode:
 # 1. If 'venv' exists locally (git clone), use it.
